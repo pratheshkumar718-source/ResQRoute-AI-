@@ -1,0 +1,24 @@
+# Environment variables and secrets
+.env
+.env.*
+*.env
+!.env.example
+
+# Dependencies & Build
+node_modules/
+dist/
+build/
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Data & Cache
+backend/data/
+.cache/
+.pytest_cache/
+
+# OS & IDE
+.DS_Store
+Thumbs.db
