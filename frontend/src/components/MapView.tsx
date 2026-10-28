@@ -89,7 +89,7 @@ export default function MapView(p: Props) {
         <Fitter pts={fitPts} token={fitToken} />
         <Controls fitIncident={() => doFit(incPts)} fitAll={() => doFit(allPts)} />
         {(p.routes ?? []).map((r, k) => (
-          <Polyline key={k} positions={r.coords} pathOptions={{ color: r.color, weight: 5, opacity: 0.85, dashArray: r.dashed ? '8 8' : undefined }}>
+          <Polyline key={k} positions={r.coords} pathOptions={{ color: r.color, weight: 6, opacity: 0.9, lineJoin: 'round', lineCap: 'round', dashArray: r.dashed ? '8 8' : undefined }}>
             <Popup>{r.label}</Popup>
           </Polyline>
         ))}
@@ -108,12 +108,13 @@ function SvgMap({ ambulances, hospitals, routes = [], focus, open, allPts, incPt
   useEffect(() => { api.get('/api/network').then(setNet).catch(() => {}) }, [])
   const W = 1000
   const proj = useMemo(() => {
-    if (!net) return null
+    if (!net || !net.bbox || typeof net.bbox.min_lat !== 'number' || !Array.isArray(net.nodes)) return null
     const b = net.bbox, kx = Math.cos(((b.min_lat + b.max_lat) / 2) * Math.PI / 180)
     const wdeg = (b.max_lng - b.min_lng) * kx, hdeg = b.max_lat - b.min_lat
     const sc = W / wdeg
     return { H: hdeg * sc, f: (lat: number, lng: number) => [(lng - b.min_lng) * kx * sc, (b.max_lat - lat) * sc] as [number, number] }
   }, [net])
+
   const [vb, setVb] = useState({ x: 0, y: 0, w: W, h: 1000 })
   const [sel, setSel] = useState<ReactNode>(null)
   useEffect(() => { if (proj) setVb({ x: 0, y: 0, w: W, h: proj.H }) }, [proj])
@@ -144,8 +145,8 @@ function SvgMap({ ambulances, hospitals, routes = [], focus, open, allPts, incPt
         onPointerUp={() => (drag.current = null)}
         onPointerMove={e => { if (!drag.current) return; const r = (e.currentTarget as SVGSVGElement).getBoundingClientRect(); const dx = (e.clientX - drag.current.x) * vb.w / r.width, dy = (e.clientY - drag.current.y) * vb.h / r.height; drag.current = { x: e.clientX, y: e.clientY }; setVb(v => ({ ...v, x: v.x - dx, y: v.y - dy })) }}>
         <rect x={-500} y={-500} width={W + 1000} height={proj.H + 1000} fill="#e8eddc" />
-        {net.edges.map((e: number[], k: number) => { const a = P(net.nodes[e[0]][0], net.nodes[e[0]][1]), b = P(net.nodes[e[1]][0], net.nodes[e[1]][1]); return <line key={k} x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} stroke={e[2] ? '#f4b942' : '#fff'} strokeWidth={e[2] ? 5 : 3} strokeLinecap="round" /> })}
-        {net.edges.map((e: number[], k: number) => { const a = P(net.nodes[e[0]][0], net.nodes[e[0]][1]), b = P(net.nodes[e[1]][0], net.nodes[e[1]][1]); return <line key={'o' + k} x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} stroke="#c8c8b8" strokeWidth={0.8} /> })}
+        {(net.edges || []).map((e: number[], k: number) => { const a = P(net.nodes[e[0]][0], net.nodes[e[0]][1]), b = P(net.nodes[e[1]][0], net.nodes[e[1]][1]); return <line key={k} x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} stroke={e[2] ? '#f4b942' : '#fff'} strokeWidth={e[2] ? 5 : 3} strokeLinecap="round" /> })}
+        {(net.edges || []).map((e: number[], k: number) => { const a = P(net.nodes[e[0]][0], net.nodes[e[0]][1]), b = P(net.nodes[e[1]][0], net.nodes[e[1]][1]); return <line key={'o' + k} x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} stroke="#c8c8b8" strokeWidth={0.8} /> })}
         {routes.map((r, k) => <polyline key={k} fill="none" stroke={r.color} strokeWidth={7} strokeLinejoin="round" strokeDasharray={r.dashed ? '14 10' : undefined} opacity={0.9}
           points={r.coords.map(c => P(c[0], c[1]).join(',')).join(' ')} onClick={() => setSel(<div className="text-sm">{r.label}</div>)} />)}
         {hospitals.map(h => { const [x, y] = P(h.lat, h.lng); return <g key={h.id} onClick={() => setSel(<HospInfo h={h} />)} className="cursor-pointer"><rect x={x - 14} y={y - 14} width={28} height={28} rx={5} fill="#1d4ed8" stroke="#fff" strokeWidth={2} /><text x={x} y={y + 6} textAnchor="middle" fill="#fff" fontWeight={800} fontSize={18}>H</text></g> })}

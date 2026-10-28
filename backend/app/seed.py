@@ -1,5 +1,5 @@
 """Database init + demo seed. Run: python -m app.seed   (add --reset to wipe)."""
-import hashlib, sys, uuid
+import hashlib, sys, uuid, json
 from .db import Base, engine, SessionLocal, EVIDENCE
 from .models import *
 from . import detection
@@ -39,14 +39,14 @@ def seed(reset=False):
         db.add_all(ambs + hosps + cams)
         db.flush()
         users = [
-            ("admin", "admin123", "Chief Dispatch Controller", "admin", None, None),
-            ("police1", "police123", "Inspector Vikram Singh (Traffic Division)", "police", None, None),
-            ("citizen1", "citizen123", "Citizen Responder Priya Raman", "citizen", None, None),
+            ("admin", "admin123", "Chief Dispatch Controller", "admin", None, None, "dispatch@resqroute.gov", "+91-44-2561-1000", json.dumps({"station_id": "DISPATCH-HQ-01", "agency": "Central Operations Command"})),
+            ("police1", "police123", "Inspector Vikram Singh (Traffic Division)", "police", None, None, "traffic.hq@police.gov.in", "+91-44-2345-0103", json.dumps({"badge_number": "TN-TP-4402", "precinct": "Central Traffic Division", "patrol_zone": "Zone 4 Arterial Corridor"})),
+            ("citizen1", "citizen123", "Citizen Responder Priya Raman", "citizen", None, None, "priya.raman@citizen.net", "+91-98402-55555", json.dumps({"blood_group": "O+", "emergency_contact_name": "Raman K (Father)", "emergency_contact_phone": "+91-98402-55556", "address": "Anna Nagar West, Chennai"})),
         ]
-        users += [(f"driver{k+1}", "driver123", a.driver_name, "driver", a.id, None) for k, a in enumerate(ambs)]
-        users += [(f"hospital{k+1}", "hospital123", f"{x.name} Trauma Unit", "hospital", None, x.id) for k, x in enumerate(hosps)]
-        for u, p, n, r, aid, hid in users:
-            db.add(User(username=u, password_hash=h(p), name=n, role=r, ambulance_id=aid, hospital_id=hid))
+        users += [(f"driver{k+1}", "driver123", a.driver_name, "driver", a.id, None, f"paramedic.{k+1}@resqroute.org", a.phone, json.dumps({"crew_level": a.crew_level, "license_number": f"TN-01-DL-2022-00{k+1}", "base_station": a.note or "Central Station"})) for k, a in enumerate(ambs)]
+        users += [(f"hospital{k+1}", "hospital123", f"{x.name} Trauma Unit", "hospital", None, x.id, f"er.{k+1}@hospital.org", x.phone, json.dumps({"department": "Emergency Trauma Care & ICU", "hotline_extension": f"Ext {100+k+1}"})) for k, x in enumerate(hosps)]
+        for u, p, n, r, aid, hid, em, ph, det in users:
+            db.add(User(username=u, password_hash=h(p), name=n, role=r, ambulance_id=aid, hospital_id=hid, email=em, phone=ph, details=det))
         db.add(AuditLog(actor="system", action="initialise", entity="system", detail="Operational network initialized with 3 trauma hospitals, 5 fleet ambulances, and 4 AI surveillance cameras"))
         db.commit()
 
@@ -54,4 +54,5 @@ def seed(reset=False):
 if __name__ == "__main__":
     seed(reset="--reset" in sys.argv)
     print("Database ready.")
+
 

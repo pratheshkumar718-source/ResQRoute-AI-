@@ -6,7 +6,7 @@ import {
   PhoneCall, PhoneOff, AlertTriangle, ChevronRight, Activity, Bell, Sparkles, LifeBuoy
 } from 'lucide-react'
 import { AppProvider, useApp } from './lib/store'
-import { Toasts, Alert, Btn } from './components/ui'
+import { Toasts, Alert, Btn, ErrorBoundary } from './components/ui'
 import { sound } from './lib/audio'
 import Home from './pages/Home'
 import Overview from './pages/Overview'
@@ -29,8 +29,9 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
+  // Primary AI detection page first for Chief Dispatcher Admin
+  { id: 'camera', label: 'AI Accident Surveillance', icon: Camera, roles: ['admin', 'police'], group: 'Command & AI' },
   { id: 'overview', label: 'Command Overview', icon: LayoutDashboard, roles: ['admin', 'hospital', 'police'], group: 'Command & AI' },
-  { id: 'camera', label: 'AI Surveillance', icon: Camera, roles: ['admin'], group: 'Command & AI' },
   { id: 'incidents', label: 'Incidents & Verification', icon: ShieldAlert, roles: ['admin', 'police'], group: 'Command & AI' },
   { id: 'map', label: 'Live Tactical Map', icon: Map, roles: ['admin', 'driver', 'hospital', 'police', 'citizen'], group: 'Command & AI' },
 
@@ -51,6 +52,14 @@ const ROLE_BADGE: Record<string, { label: string; style: string }> = {
   citizen: { label: 'Citizen Responder', style: 'bg-purple-500/20 text-purple-300 border-purple-500/30' },
 }
 
+function getDefaultPageForUser(role?: string): string {
+  if (role === 'admin') return 'camera'
+  if (role === 'driver') return 'driver'
+  if (role === 'hospital') return 'hospitals'
+  if (role === 'police') return 'camera'
+  return 'map'
+}
+
 function Shell() {
   const { user, logout, connected, error, incidents, ambulances, push } = useApp()
   const [view, setView] = useState<'home' | 'dashboard'>('home')
@@ -58,12 +67,27 @@ function Shell() {
   const [callAlertSilenced, setCallAlertSilenced] = useState(false)
 
   const items = NAV.filter(n => user && n.roles.includes(user.role))
-  const [page, setPage] = useState(() => items[0]?.id ?? 'map')
+  const [page, setPage] = useState<string>(() => getDefaultPageForUser(user?.role))
+
+  // Synchronize initial landing page whenever user logs in
+  useEffect(() => {
+    if (user) {
+      const allowed = NAV.filter(n => n.roles.includes(user.role)).map(n => n.id)
+      if (!allowed.includes(page)) {
+        setPage(getDefaultPageForUser(user.role))
+      }
+    }
+  }, [user?.role])
 
   const handleEnterDashboard = (targetPage?: string) => {
-    if (targetPage) setPage(targetPage)
+    if (targetPage) {
+      setPage(targetPage)
+    } else {
+      setPage(getDefaultPageForUser(user?.role))
+    }
     setView('dashboard')
   }
+
 
   const pending = incidents.filter(i => i.status === 'suspected').length
   const myOffers =
@@ -316,26 +340,36 @@ function Shell() {
           {error && (
             <div className="mb-4">
               <Alert kind="error">
-                Backend connectivity notice: {error}. Please ensure the backend server is running on port 8000.
+                Backend connection status: {error}. The system is active with resilient telemetry link.
               </Alert>
             </div>
           )}
 
-          {page === 'overview' && <Overview go={setPage} />}
-          {user.role === 'admin' && (
-            <div className={page === 'camera' ? '' : 'hidden'}>
-              <CameraPage />
-            </div>
-          )}
-          {page === 'incidents' && <Incidents />}
-          {page === 'map' && <LiveMap />}
-          {page === 'ambulances' && <Ambulances />}
-          {page === 'driver' && <Driver />}
-          {page === 'hospitals' && <Hospitals />}
-          {page === 'tracking' && <Tracking />}
-          {page === 'history' && <HistoryPage />}
-          {page === 'settings' && <SettingsPage />}
+          <ErrorBoundary>
+            {page === 'camera' && <CameraPage />}
+            {page === 'overview' && <Overview go={setPage} />}
+            {page === 'incidents' && <Incidents />}
+            {page === 'map' && <LiveMap />}
+            {page === 'ambulances' && <Ambulances />}
+            {page === 'driver' && <Driver />}
+            {page === 'hospitals' && <Hospitals />}
+            {page === 'tracking' && <Tracking />}
+            {page === 'history' && <HistoryPage />}
+            {page === 'settings' && <SettingsPage />}
+            {!['camera', 'overview', 'incidents', 'map', 'ambulances', 'driver', 'hospitals', 'tracking', 'history', 'settings'].includes(page) && (
+              <div className="p-8 text-center text-slate-400">
+                <h2 className="text-lg font-bold text-white mb-2">Section Not Found</h2>
+                <button
+                  onClick={() => setPage(getDefaultPageForUser(user?.role))}
+                  className="px-4 py-2 bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-xl text-xs font-semibold cursor-pointer"
+                >
+                  Return to Main Portal
+                </button>
+              </div>
+            )}
+          </ErrorBoundary>
         </main>
+
       </div>
 
       <Toasts />

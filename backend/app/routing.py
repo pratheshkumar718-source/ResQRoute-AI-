@@ -5,7 +5,7 @@ roads) is generated around a fictional demo area. Routes are Dijkstra shortest-T
 paths over that graph. They are NOT real roads: distances and ETAs are simulated
 estimates. No external routing API is used.
 """
-import heapq, math, random
+import heapq, math, random, json, urllib.request
 from functools import lru_cache
 
 N = 14
@@ -120,11 +120,44 @@ def _route(a, b):
     return [list(c) for c in cl], dist, tm
 
 
+@lru_cache(maxsize=1024)
+def _osrm_route(a, b):
+    try:
+        url = f"https://router.project-osrm.org/route/v1/driving/{a[1]},{a[0]};{b[1]},{b[0]}?overview=full&geometries=geojson"
+        req = urllib.request.Request(url, headers={"User-Agent": "ResQRoute-AI/1.0"})
+        with urllib.request.urlopen(req, timeout=3.0) as res:
+            data = json.loads(res.read().decode())
+            if data.get("code") == "Ok" and data.get("routes"):
+                r = data["routes"][0]
+                coords = [[round(lat, 6), round(lng, 6)] for lng, lat in r["geometry"]["coordinates"]]
+                dist_km = round(r["distance"] / 1000.0, 2)
+                eta_min = round(max(r["duration"] / 60.0, 0.5), 1)
+                return coords, dist_km, eta_min
+    except Exception:
+        pass
+    return None
+
+
 def route(a, b):
     a = (round(a[0], 5), round(a[1], 5)); b = (round(b[0], 5), round(b[1], 5))
+    osrm = _osrm_route(a, b)
+    if osrm:
+        coords, dist, tm = osrm
+        return {
+            "coords": coords,
+            "distance_km": dist,
+            "eta_min": tm,
+            "simulated": False,
+            "label": f"Live Street Route ({len(coords)} turn points on road network)",
+        }
     coords, dist, tm = _route(a, b)
-    return {"coords": coords, "distance_km": round(dist, 2), "eta_min": round(max(tm, 0.3), 1),
-            "simulated": True, "label": "SIMULATED route on a generated demo road network — not real roads/traffic"}
+    return {
+        "coords": coords,
+        "distance_km": round(dist, 2),
+        "eta_min": round(max(tm, 0.3), 1),
+        "simulated": True,
+        "label": "Road grid route along street corridors",
+    }
 
 
 def cumulative(coords):

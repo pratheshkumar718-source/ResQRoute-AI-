@@ -70,7 +70,7 @@ export default function HistoryPage() {
       <Card title="System Audit Log (Latest Activity)">
         {!h ? (
           <Spinner label="Loading audit trails..." />
-        ) : !h.audit.length ? (
+        ) : !h?.audit?.length ? (
           <Empty text="No audit entries logged" />
         ) : (
           <div className="max-h-96 overflow-y-auto">
@@ -85,11 +85,11 @@ export default function HistoryPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5 font-mono">
-                {h.audit.map((l: any) => (
+                {(h.audit || []).map((l: any) => (
                   <tr key={l.id} className="hover:bg-white/[0.02] transition">
                     <td className="py-2.5 px-2 text-slate-400 whitespace-nowrap">{fmtDT(l.ts)}</td>
                     <td className="text-cyan-400 font-bold">{l.actor}</td>
-                    <td className="text-slate-200 capitalize">{l.action.replace(/_/g, ' ')}</td>
+                    <td className="text-slate-200 capitalize">{String(l.action || '').replace(/_/g, ' ')}</td>
                     <td className="text-amber-300">
                       {l.entity} {l.entity_id ?? ''}
                     </td>

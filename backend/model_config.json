@@ -1,0 +1,21 @@
+{
+  "architecture": "resnet18",
+  "num_classes": 2,
+  "image_size": 224,
+  "class_names": [
+    "background",
+    "near_accident_event"
+  ],
+  "normalization_mean": [
+    0.485,
+    0.456,
+    0.406
+  ],
+  "normalization_std": [
+    0.229,
+    0.224,
+    0.225
+  ],
+  "task": "experimental frame-level accident-time proximity classification",
+  "warning": "Not validated for real-world accident detection or emergency dispatch."
+}

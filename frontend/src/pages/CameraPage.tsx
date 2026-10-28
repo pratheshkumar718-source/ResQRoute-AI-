@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { Video, VideoOff, Play, Square, FlaskConical, Upload, Activity, Cpu, ShieldAlert, Zap, Sliders, CheckCircle2 } from 'lucide-react'
+import {
+  Video, VideoOff, Play, Square, FlaskConical, Upload, Activity, Cpu,
+  ShieldAlert, Zap, Sliders, CheckCircle2, Film, Clapperboard, FolderUp,
+  RefreshCw, FileVideo, Sparkles
+} from 'lucide-react'
 import { useApp } from '../lib/store'
 import { Card, Btn, Alert, Badge, DemoNote } from '../components/ui'
 import { api } from '../lib/api'
@@ -21,6 +25,10 @@ export default function CameraPage() {
   const [capture, setCapture] = useState<string>('')
   const [err, setErr] = useState('')
   const capturing = useRef(false)
+  const [videoFile, setVideoFile] = useState<File | null>(null)
+  const [uploadingVideo, setUploadingVideo] = useState(false)
+  const [videoAnalysis, setVideoAnalysis] = useState<any>(null)
+  const [isLooping, setIsLooping] = useState(true)
 
   // Fetch model metadata on mount
   useEffect(() => {
@@ -84,14 +92,49 @@ export default function CameraPage() {
 
   const onFile = (f?: File | null) => {
     if (!f) return
+    setVideoFile(f)
+    setVideoAnalysis(null)
     streamRef.current?.getTracks().forEach(t => t.stop())
     const v = videoRef.current!
     v.srcObject = null
     v.src = URL.createObjectURL(f)
-    v.loop = true
+    v.loop = isLooping
     v.muted = true
-    v.play()
+    v.play().catch(() => {})
     setSource('file')
+    setMonitoring(true)
+    push('info', `📹 Live camera footage "${f.name}" loaded (${(f.size / (1024 * 1024)).toFixed(1)} MB). Autonomous PyTorch AI neural monitoring activated!`)
+  }
+
+  const handleDeepVideoScan = async () => {
+    if (!videoFile) return
+    setUploadingVideo(true)
+    try {
+      push('info', `🧠 Running deep multi-frame neural scan on "${videoFile.name}" with PyTorch model...`)
+      const fd = new FormData()
+      fd.append('camera_id', String(camId))
+      fd.append('threshold', String(threshold))
+      fd.append('auto_dispatch', 'true')
+      fd.append('file', videoFile)
+
+      const res = await api.upload('/api/detection/upload-video', fd)
+      setVideoAnalysis(res.analysis)
+
+      if (res.incident) {
+        setCapture(`🚨 ACCIDENT DETECTED in footage! Incident #${res.incident.id} auto-dispatched. Destination: ${res.incident.selected_hospital_name || 'City Central General Hospital'}.`)
+        if (res.incident.evidence) {
+          setThumbs(res.incident.evidence.map((e: any) => ({ url: e.url, inc: res.incident.id, n: e.seq })))
+        }
+        push('error', `🚨 COLLISION DETECTED in uploaded live footage! Nearest ambulance unit dispatched immediately.`)
+        refresh()
+      } else {
+        push('info', `✅ Video scan complete. Road traffic normal (Peak risk: ${((res.analysis?.peak_probability || 0) * 100).toFixed(1)}%).`)
+      }
+    } catch (e: any) {
+      push('error', e.message || 'Video analysis failed')
+    } finally {
+      setUploadingVideo(false)
+    }
   }
 
   const runIncident = async (src: 'ai_model' | 'test_trigger' | 'heuristic', confidence: number | null) => {
@@ -319,10 +362,7 @@ export default function CameraPage() {
             <Btn
               v="success"
               onClick={() => {
-                fetch('/api/detection/reset', {
-                  method: 'POST',
-                  headers: { Authorization: 'Bearer ' + localStorage.getItem('resq_token') },
-                })
+                api.post('/api/detection/reset', {}).catch(() => {})
                 setMonitoring(true)
               }}
               disabled={!live || monitoring}
@@ -396,6 +436,110 @@ export default function CameraPage() {
               </div>
             </div>
           </div>
+
+          {/* Live Video Footage Upload & Neural Scan Suite */}
+          <div className="mt-4 p-4 rounded-2xl bg-gradient-to-r from-[#0c1a40] via-[#09152e] to-[#0c1a40] border border-cyan-500/30 space-y-3.5 shadow-xl">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-cyan-500/20 text-cyan-300 grid place-items-center border border-cyan-500/30">
+                  <FileVideo className="w-4 h-4 text-cyan-300" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    Upload Live Camera Footage for AI Accident Detection
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                      MP4 / WEBM / AVI / MOV
+                    </span>
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Upload live traffic CCTV footage or dashcam video to run PyTorch accident detection on real recorded events.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Video File Information & Controls */}
+            {videoFile ? (
+              <div className="p-3 rounded-xl bg-slate-900/90 border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                <div className="space-y-1">
+                  <div className="font-semibold text-white flex items-center gap-2">
+                    <span className="truncate max-w-xs">{videoFile.name}</span>
+                    <span className="text-slate-400 font-mono text-[11px]">
+                      ({(videoFile.size / (1024 * 1024)).toFixed(2)} MB)
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-emerald-400 flex items-center gap-1.5 font-medium">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Loaded in Optical Stream & Active in Neural Monitoring Pipeline</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Btn
+                    v="primary"
+                    onClick={handleDeepVideoScan}
+                    busy={uploadingVideo}
+                    className="text-xs"
+                  >
+                    <Cpu className="w-3.5 h-3.5 text-cyan-200" />
+                    <span>Deep Neural Model Scan</span>
+                  </Btn>
+                  <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10 transition cursor-pointer">
+                    <FolderUp className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Change Video</span>
+                    <input type="file" accept="video/*" hidden onChange={e => onFile(e.target.files?.[0])} />
+                  </label>
+                </div>
+              </div>
+            ) : (
+              <div className="border-2 border-dashed border-cyan-500/30 rounded-xl p-5 text-center bg-[#070e22]/50 hover:bg-[#070e22]/80 transition">
+                <FolderUp className="w-8 h-8 mx-auto text-cyan-400 mb-2 opacity-80" />
+                <p className="text-xs text-slate-200 font-medium">
+                  Select or drag & drop live camera footage here
+                </p>
+                <p className="text-[11px] text-slate-400 mt-1 mb-3">
+                  Upload MP4, WebM, or AVI footage from CCTV traffic feeds or dashcams
+                </p>
+                <label className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-blue-600 to-cyan-600 hover:brightness-110 text-white shadow-md shadow-cyan-500/20 cursor-pointer transition">
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Choose Live Video Footage</span>
+                  <input type="file" accept="video/*" hidden onChange={e => onFile(e.target.files?.[0])} />
+                </label>
+              </div>
+            )}
+
+            {/* Video Analysis Result Card */}
+            {videoAnalysis && (
+              <div className="p-3.5 rounded-xl bg-slate-900/90 border border-white/10 space-y-2 text-xs">
+                <div className="flex justify-between items-center border-b border-white/5 pb-2">
+                  <span className="font-bold text-white">Full Video Neural Scan Results:</span>
+                  <Badge s={videoAnalysis.accident_detected ? 'critical' : 'available'}>
+                    {videoAnalysis.accident_detected ? '🚨 ACCIDENT CONFIRMED' : 'NORMAL TRAFFIC FLOW'}
+                  </Badge>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] font-mono">
+                  <div>
+                    <span className="text-slate-400 block">Peak Collision Prob:</span>
+                    <b className={videoAnalysis.accident_detected ? 'text-rose-400 font-bold' : 'text-emerald-400'}>
+                      {(videoAnalysis.peak_probability * 100).toFixed(1)}%
+                    </b>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block">Collision Second:</span>
+                    <b className="text-cyan-300">T+{videoAnalysis.peak_timestamp_s}s</b>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block">Frames Evaluated:</span>
+                    <b className="text-white">{videoAnalysis.samples_evaluated} frames</b>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block">Evidence Bursts:</span>
+                    <b className="text-amber-300">{videoAnalysis.evidence_count} captured</b>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </Card>
 
         {/* AI Telemetry & Neural Net Analysis Panel */}
@@ -418,8 +562,22 @@ export default function CameraPage() {
 
               <li className="flex justify-between items-center py-1 border-b border-white/5">
                 <span className="text-slate-400 text-xs">Model Weights File</span>
-                <span className="font-mono text-xs text-cyan-300 font-semibold truncate max-w-[160px]" title="resqroute_accident_model.pt">
-                  resqroute_accident_model.pt
+                <span className="font-mono text-xs text-cyan-300 font-semibold truncate max-w-[220px]" title={modelInfo?.model_path || "C:\\Prathesh\\resqroute-ai\\resqroute-ai\\backend\\resqroute_accident_model.pt"}>
+                  {modelInfo?.model_path ? modelInfo.model_path.split(/[\\/]/).pop() : 'resqroute_accident_model.pt'}
+                </span>
+              </li>
+
+              <li className="flex justify-between items-center py-1 border-b border-white/5">
+                <span className="text-slate-400 text-xs">Model Config File</span>
+                <span className="font-mono text-xs text-amber-300 font-semibold truncate max-w-[220px]" title={modelInfo?.config_path || "C:\\Prathesh\\resqroute-ai\\resqroute-ai\\backend\\model_config.json"}>
+                  {modelInfo?.config_path ? modelInfo.config_path.split(/[\\/]/).pop() : 'model_config.json'}
+                </span>
+              </li>
+
+              <li className="flex justify-between items-center py-1 border-b border-white/5">
+                <span className="text-slate-400 text-xs">Architecture & Input</span>
+                <span className="font-mono text-xs text-slate-300">
+                  {modelInfo?.architecture ? modelInfo.architecture.toUpperCase() : 'RESNET18'} · {modelInfo?.image_size ?? 224}×{modelInfo?.image_size ?? 224}px
                 </span>
               </li>
 

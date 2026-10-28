@@ -14,9 +14,13 @@ class User(Base):
     username = Column(String, unique=True, nullable=False)
     password_hash = Column(String, nullable=False)
     name = Column(String)
-    role = Column(String, nullable=False)  # admin | driver | hospital
+    role = Column(String, nullable=False)  # admin | driver | hospital | police | citizen
     ambulance_id = Column(Integer, ForeignKey("ambulances.id"), nullable=True)
     hospital_id = Column(Integer, ForeignKey("hospitals.id"), nullable=True)
+    email = Column(String, nullable=True)
+    phone = Column(String, nullable=True)
+    details = Column(Text, nullable=True)  # JSON-encoded role-specific details
+
 
 
 class Camera(Base):

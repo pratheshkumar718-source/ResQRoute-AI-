@@ -10,18 +10,18 @@ function HospitalPanel({ inc }: { inc: Incident }) {
   const act = useAct(); const { hospitals } = useApp()
   const [recs, setRecs] = useState<any>(null)
   useEffect(() => { api.get(`/api/incidents/${inc.id}/hospital-recommendations`).then(setRecs).catch(() => setRecs(null)) }, [inc.id, inc.status, inc.selected_hospital_id, hospitals])
-  if (!recs) return null
+  if (!recs || !Array.isArray(recs.candidates)) return null
   const noneEligible = !recs.candidates.some((c: any) => c.eligible)
   return (
     <Card title="Hospital Recommendation & Clinical Bed Match">
-      <p className="text-xs text-slate-400 mb-2">Care Needs: {recs.needs.join(', ') || 'general'} · {recs.disclaimer}</p>
+      <p className="text-xs text-slate-400 mb-2">Care Needs: {(recs.needs || []).join(', ') || 'general'} · {recs.disclaimer || 'Automated bed allocation'}</p>
       {recs.warning && <div className="mb-2"><Alert kind="error">{recs.warning}</Alert></div>}
       <ul className="space-y-2">{recs.candidates.map((c: any) => (
-        <li key={c.hospital.id} className={`border rounded-xl p-3 text-sm transition ${c.hospital.id === recs.selected_hospital_id ? 'border-emerald-500 bg-emerald-950/30 text-white' : 'border-white/10 bg-slate-900/60 text-slate-300'}`}>
-          <div className="flex justify-between items-start gap-2"><div><b className="text-white">{c.hospital.name}</b> {c.eligible ? <Badge s="available">eligible #{c.rank}</Badge> : <Badge s="offline">excluded</Badge>}
-            <div className="text-xs text-slate-300 mt-1">{c.eligible ? c.explanation : 'Excluded: ' + c.excluded_reasons.join('; ')}</div>
+        <li key={c.hospital?.id || Math.random()} className={`border rounded-xl p-3 text-sm transition ${c.hospital?.id === recs.selected_hospital_id ? 'border-emerald-500 bg-emerald-950/30 text-white' : 'border-white/10 bg-slate-900/60 text-slate-300'}`}>
+          <div className="flex justify-between items-start gap-2"><div><b className="text-white">{c.hospital?.name}</b> {c.eligible ? <Badge s="available">eligible #{c.rank}</Badge> : <Badge s="offline">excluded</Badge>}
+            <div className="text-xs text-slate-300 mt-1">{c.eligible ? c.explanation : 'Excluded: ' + (c.excluded_reasons || []).join('; ')}</div>
             <div className="text-xs text-slate-400 mt-0.5">{c.distance_km} km · ETA {c.eta_min} min (simulated)</div></div>
-            {inc.status === 'assessed' && c.hospital.id !== recs.selected_hospital_id && (c.eligible || (noneEligible && c.hospital.receiving)) &&
+            {inc.status === 'assessed' && c.hospital?.id !== recs.selected_hospital_id && (c.eligible || (noneEligible && c.hospital?.receiving)) &&
               <Btn v="ghost" onClick={() => act(() => api.post(`/api/incidents/${inc.id}/select-hospital`, { hospital_id: c.hospital.id, override: !c.eligible }), 'Destination updated')}>{c.eligible ? 'Select' : 'Override'}</Btn>}</div>
         </li>))}</ul>
     </Card>

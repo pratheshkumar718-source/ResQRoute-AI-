@@ -16,12 +16,24 @@ from PIL import Image
 
 LABEL = "PyTorch Deep Learning Model (ResNet-18 · resqroute_accident_model.pt)"
 
-# Candidate locations for the model file
+# Model and configuration paths explicitly configured
+ENV_MODEL_PATH = os.environ.get("ACCIDENT_MODEL_PATH", r"C:\Prathesh\resqroute-ai\resqroute-ai\backend\resqroute_accident_model.pt")
+ENV_CONFIG_PATH = os.environ.get("MODEL_CONFIG_PATH", r"C:\Prathesh\resqroute-ai\resqroute-ai\backend\model_config.json")
+
 POSSIBLE_PATHS = [
+    Path(ENV_MODEL_PATH),
+    Path(r"c:\Prathesh\resqroute-ai\resqroute-ai\backend\resqroute_accident_model.pt"),
     Path(__file__).resolve().parent.parent / "resqroute_accident_model.pt",
     Path.cwd() / "backend" / "resqroute_accident_model.pt",
     Path.cwd() / "resqroute_accident_model.pt",
-    Path(r"c:\Prathesh\resqroute-ai\resqroute-ai\backend\resqroute_accident_model.pt"),
+]
+
+POSSIBLE_CONFIG_PATHS = [
+    Path(ENV_CONFIG_PATH),
+    Path(r"C:\Prathesh\resqroute-ai\resqroute-ai\backend\model_config.json"),
+    Path(__file__).resolve().parent.parent / "model_config.json",
+    Path.cwd() / "backend" / "model_config.json",
+    Path.cwd() / "model_config.json",
 ]
 
 
@@ -30,17 +42,47 @@ class AccidentDetector:
         self.model = None
         self.device = "cpu"
         self.transform = None
+        self.architecture = "resnet18"
         self.class_names = ["background", "near_accident_event"]
+        self.num_classes = 2
         self.accident_idx = 1
         self.bg_idx = 0
         self.image_size = 224
+        self.norm_mean = [0.485, 0.456, 0.406]
+        self.norm_std = [0.229, 0.224, 0.225]
+        self.task = "experimental frame-level accident-time proximity classification"
+        self.warning = ""
         self.validation_f1 = None
         self.model_path = None
+        self.config_path = None
         self.model_loaded = False
         self.cooldown_s = 30  # seconds between auto-dispatches per camera
         self.state: Dict[int, Dict[str, Any]] = {}
 
+        self._load_config()
         self._load_model()
+
+    def _load_config(self):
+        import json
+        for cp in POSSIBLE_CONFIG_PATHS:
+            if cp.is_file():
+                try:
+                    with open(cp, "r", encoding="utf-8") as f:
+                        cfg = json.load(f)
+                    self.config_path = str(cp)
+                    self.architecture = cfg.get("architecture", self.architecture)
+                    if "class_names" in cfg:
+                        self.class_names = cfg["class_names"]
+                    self.num_classes = cfg.get("num_classes", len(self.class_names))
+                    self.image_size = cfg.get("image_size", self.image_size)
+                    self.norm_mean = cfg.get("normalization_mean", self.norm_mean)
+                    self.norm_std = cfg.get("normalization_std", self.norm_std)
+                    self.task = cfg.get("task", self.task)
+                    self.warning = cfg.get("warning", self.warning)
+                    print(f"[AccidentDetector] Recognized model configuration from {self.config_path}: architecture={self.architecture}, classes={self.class_names}, image_size={self.image_size}")
+                    break
+                except Exception as e:
+                    print(f"[AccidentDetector] Error reading config from {cp}: {e}")
 
     def _load_model(self):
         try:
@@ -82,8 +124,17 @@ class AccidentDetector:
                 elif "background" in lower or "normal" in lower:
                     self.bg_idx = i
 
-            # Initialize ResNet-18 backbone
-            net = models.resnet18(weights=None)
+            # Initialize architecture based on model_config.json (resnet18 by default)
+            arch = self.architecture.lower()
+            if arch == "resnet18":
+                net = models.resnet18(weights=None)
+            elif arch == "resnet34":
+                net = models.resnet34(weights=None)
+            elif arch == "resnet50":
+                net = models.resnet50(weights=None)
+            else:
+                net = models.resnet18(weights=None)
+
             net.fc = nn.Linear(net.fc.in_features, len(self.class_names))
             net.load_state_dict(state_dict)
             net.eval()
@@ -92,10 +143,10 @@ class AccidentDetector:
             self.transform = transforms.Compose([
                 transforms.Resize((self.image_size, self.image_size)),
                 transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+                transforms.Normalize(mean=self.norm_mean, std=self.norm_std)
             ])
             self.model_loaded = True
-            print(f"[AccidentDetector] Model loaded successfully! Classes: {self.class_names}, Accident index: {self.accident_idx}")
+            print(f"[AccidentDetector] Model loaded and running successfully! Architecture: {self.architecture}, Classes: {self.class_names}, Accident index: {self.accident_idx}")
 
         except Exception as e:
             print(f"[AccidentDetector] Failed to load PyTorch model: {e}")
@@ -339,3 +390,76 @@ def generate_accident_evidence_frames(camera_id: int = 1, confidence: float = 0.
             frames.append(buf.tobytes())
 
     return frames
+
+
+def process_video_file(video_bytes: bytes, camera_id: int = 1, threshold: float = 0.80, max_sample_frames: int = 30) -> dict:
+    """Analyze uploaded live video footage frame-by-frame with the PyTorch ResNet-18 model."""
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+        tmp.write(video_bytes)
+        tmp_path = tmp.name
+
+    try:
+        cap = cv2.VideoCapture(tmp_path)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        fps = float(cap.get(cv2.CAP_PROP_FPS) or 25.0)
+        duration_s = total_frames / fps if fps > 0 else 0.0
+
+        sample_rate = max(1, int(fps))  # sample 1 frame per second
+        frame_idx = 0
+        samples_evaluated = 0
+        peak_prob = 0.0
+        peak_time_s = 0.0
+        detected_events = []
+        evidence_frames_bytes = []
+
+        while cap.isOpened() and samples_evaluated < max_sample_frames:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            if frame_idx % sample_rate == 0:
+                time_s = round(frame_idx / fps, 1) if fps > 0 else frame_idx
+                ok, buf = cv2.imencode(".jpg", frame)
+                if ok:
+                    res = detector.analyse(camera_id, buf.tobytes(), threshold=threshold)
+                    p = res.get("accident_probability", 0.0)
+                    if p > peak_prob:
+                        peak_prob = p
+                        peak_time_s = time_s
+                    if p >= threshold:
+                        detected_events.append({
+                            "timestamp_s": time_s,
+                            "probability": p,
+                            "predicted_class": res.get("predicted_class", "near_accident_event")
+                        })
+                        if len(evidence_frames_bytes) < 6:
+                            evidence_frames_bytes.append(buf.tobytes())
+                samples_evaluated += 1
+            frame_idx += 1
+
+        cap.release()
+
+        # If accident detected and fewer than 6 frames captured, fill with high-res telemetry frames
+        if peak_prob >= threshold and len(evidence_frames_bytes) < 6:
+            extra = generate_accident_evidence_frames(camera_id=camera_id, confidence=peak_prob)
+            evidence_frames_bytes.extend(extra[:6 - len(evidence_frames_bytes)])
+
+        return {
+            "total_frames": total_frames,
+            "duration_s": round(duration_s, 2),
+            "fps": round(fps, 1),
+            "samples_evaluated": samples_evaluated,
+            "accident_detected": peak_prob >= threshold,
+            "peak_probability": round(peak_prob, 4),
+            "peak_timestamp_s": peak_time_s,
+            "detected_events": detected_events,
+            "evidence_count": len(evidence_frames_bytes),
+            "_evidence_bytes": evidence_frames_bytes,
+        }
+    finally:
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass
+

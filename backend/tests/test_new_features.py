@@ -161,3 +161,35 @@ def test_accident_detection_crossing_80_percent_assigns_nearest_ambulance_and_ho
     my_inc = next(i for i in me_resp.json() if i["id"] == inc["id"])
     assert len(my_inc["evidence"]) == 6
     assert my_inc["selected_hospital_name"] is not None
+
+
+def test_user_registration_and_login_flow(client):
+    # 1. Register a new citizen responder
+    reg_payload = {
+        "name": "Dr. Prathesh Kumar",
+        "username": "dr_prathesh",
+        "password": "SecurePassword123",
+        "role": "citizen"
+    }
+    r = client.post("/api/auth/register", json=reg_payload)
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert "token" in data
+    assert data["user"]["username"] == "dr_prathesh"
+    assert data["user"]["role"] == "citizen"
+
+    # 2. Login with newly registered credentials
+    login_resp = client.post("/api/auth/login", json={"username": "dr_prathesh", "password": "SecurePassword123"})
+    assert login_resp.status_code == 200
+    token = login_resp.json()["token"]
+    assert len(token) > 0
+
+    # 3. Access authenticated me endpoint
+    me_resp = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert me_resp.status_code == 200
+    assert me_resp.json()["username"] == "dr_prathesh"
+
+    # 4. Duplicate registration should be prevented cleanly
+    dup_resp = client.post("/api/auth/register", json=reg_payload)
+    assert dup_resp.status_code == 400
+    assert "already registered" in dup_resp.text.lower()

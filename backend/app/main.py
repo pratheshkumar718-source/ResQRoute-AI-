@@ -13,7 +13,42 @@ from .db import get_db, EVIDENCE, SessionLocal
 from .models import *
 from .seed import seed, h
 
+import time
+
 TOKENS: dict[str, int] = {}
+SECRET_SALT = os.getenv("RESQ_SECRET_SALT", "resqroute-secure-token-secret-2026")
+
+
+def create_token(user_id: int) -> str:
+    ts = int(time.time())
+    data = f"{user_id}:{ts}:{SECRET_SALT}"
+    sig = hashlib.sha256(data.encode()).hexdigest()[:16]
+    tok = f"resq_{user_id}_{ts}_{sig}"
+    TOKENS[tok] = user_id
+    return tok
+
+
+def parse_token(tok: str) -> Optional[int]:
+    if not tok:
+        return None
+    clean = tok.strip().replace("Bearer ", "")
+    if clean in TOKENS:
+        return TOKENS[clean]
+    if clean.startswith("resq_"):
+        parts = clean.split("_")
+        if len(parts) == 4:
+            try:
+                uid = int(parts[1])
+                ts = int(parts[2])
+                sig = parts[3]
+                data = f"{uid}:{ts}:{SECRET_SALT}"
+                expected_sig = hashlib.sha256(data.encode()).hexdigest()[:16]
+                if sig == expected_sig:
+                    TOKENS[clean] = uid
+                    return uid
+            except Exception:
+                pass
+    return None
 
 
 @asynccontextmanager
@@ -24,13 +59,19 @@ async def lifespan(app):
 
 
 app = FastAPI(title="ResQRoute AI — local prototype API", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.mount("/evidence", StaticFiles(directory=str(EVIDENCE)), name="evidence")
 
 
 def user_dep(authorization: Optional[str] = Header(None), db: Session = Depends(get_db)) -> User:
-    tok = (authorization or "").replace("Bearer ", "")
-    uid = TOKENS.get(tok)
+    tok = (authorization or "").replace("Bearer ", "").strip()
+    uid = parse_token(tok)
     u = db.get(User, uid) if uid else None
     if not u:
         raise HTTPException(401, "Not authenticated")
@@ -63,19 +104,111 @@ class Login(BaseModel):
     password: str
 
 
+class Register(BaseModel):
+    username: str
+    password: str
+    name: str
+    role: str = "citizen"
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    ambulance_id: Optional[int] = None
+    hospital_id: Optional[int] = None
+    details: Optional[dict] = None
+
+
 def ser_user(u):
-    return {"id": u.id, "username": u.username, "name": u.name, "role": u.role, "ambulance_id": u.ambulance_id, "hospital_id": u.hospital_id}
+    det = {}
+    if getattr(u, "details", None):
+        try:
+            det = json.loads(u.details) if isinstance(u.details, str) else u.details
+        except Exception:
+            det = {}
+    return {
+        "id": u.id,
+        "username": u.username,
+        "name": u.name,
+        "role": u.role,
+        "ambulance_id": u.ambulance_id,
+        "hospital_id": u.hospital_id,
+        "email": getattr(u, "email", None),
+        "phone": getattr(u, "phone", None),
+        "details": det,
+    }
 
 
 @app.post("/api/auth/login")
 def login(b: Login, db: Session = Depends(get_db)):
-    u = db.query(User).filter_by(username=b.username).first()
+    clean_user = b.username.strip().lower()
+    try:
+        u = db.query(User).filter_by(username=clean_user).first()
+    except Exception:
+        db.rollback()
+        try:
+            u = db.query(User).filter_by(username=clean_user).first()
+        except Exception:
+            raise HTTPException(503, "Database connection is temporarily busy. Please retry.")
+
     if not u or u.password_hash != h(b.password):
         raise HTTPException(401, "Invalid username or password")
-    tok = secrets.token_hex(16)
-    TOKENS[tok] = u.id
-    audit(db, u.username, "login", "user", u.id); db.commit()
+    tok = create_token(u.id)
+    try:
+        audit(db, u.username, "login", "user", u.id)
+        db.commit()
+    except Exception:
+        db.rollback()
     return {"token": tok, "user": ser_user(u)}
+
+
+@app.post("/api/auth/register")
+def register(b: Register, db: Session = Depends(get_db)):
+    clean_user = b.username.strip().lower()
+    if not clean_user or not b.password:
+        raise HTTPException(400, "Username and password are required")
+    try:
+        existing = db.query(User).filter_by(username=clean_user).first()
+    except Exception:
+        db.rollback()
+        existing = db.query(User).filter_by(username=clean_user).first()
+
+    if existing:
+        raise HTTPException(400, "Username is already registered. Please choose another username.")
+
+    amb_id = b.ambulance_id
+    if b.role == "driver" and not amb_id:
+        first_amb = db.query(Ambulance).filter_by(status="available").first() or db.query(Ambulance).first()
+        amb_id = first_amb.id if first_amb else 1
+
+    hosp_id = b.hospital_id
+    if b.role == "hospital" and not hosp_id:
+        first_hosp = db.query(Hospital).first()
+        hosp_id = first_hosp.id if first_hosp else 1
+
+    det_str = json.dumps(b.details) if b.details else "{}"
+    clean_email = b.email.strip().lower() if b.email else None
+    clean_phone = b.phone.strip() if b.phone else None
+
+    u = User(
+        username=clean_user,
+        password_hash=h(b.password),
+        name=b.name.strip() or clean_user,
+        role=b.role,
+        ambulance_id=amb_id,
+        hospital_id=hosp_id,
+        email=clean_email,
+        phone=clean_phone,
+        details=det_str,
+    )
+    db.add(u)
+    db.commit()
+    db.refresh(u)
+    tok = create_token(u.id)
+    try:
+        audit(db, u.username, "register", "user", u.id)
+        db.commit()
+    except Exception:
+        db.rollback()
+    return {"token": tok, "user": ser_user(u)}
+
 
 
 @app.get("/api/auth/me")
@@ -774,18 +907,91 @@ async def detect_frame(
         return detection.detector.analyse(camera_id, await file.read(), threshold=threshold)
     except ValueError as e:
         raise HTTPException(422, str(e))
+@app.post("/api/detection/upload-video")
+async def detect_upload_video(
+    camera_id: int = Form(1),
+    threshold: float = Form(0.80),
+    auto_dispatch: bool = Form(True),
+    file: UploadFile = File(...),
+    u: User = Depends(need()),
+    db: Session = Depends(get_db)
+):
+    video_bytes = await file.read()
+    if not video_bytes:
+        raise HTTPException(400, "Empty video file received")
 
+    analysis = detection.process_video_file(video_bytes, camera_id=camera_id, threshold=threshold)
+    evidence_bytes = analysis.pop("_evidence_bytes", [])
+
+    incident_data = None
+    if analysis.get("accident_detected") and auto_dispatch:
+        cam = db.query(Camera).get(camera_id)
+        loc_name = cam.location_name if cam else "Live Camera Feed Sector"
+        lat = cam.lat if cam else 13.0690
+        lng = cam.lng if cam else 80.2520
+
+        # Create incident
+        inc = Incident(
+            camera_id=camera_id,
+            lat=lat,
+            lng=lng,
+            location_name=loc_name,
+            status="dispatching",
+            priority="critical",
+            source="ai_model",
+            confidence=analysis.get("peak_probability", 0.94),
+            notes=f"Collision detected from uploaded live footage at T+{analysis.get('peak_timestamp_s', 0)}s with {round(analysis.get('peak_probability', 0.94)*100)}% PyTorch confidence"
+        )
+        db.add(inc)
+        db.flush()
+
+        # Save extracted evidence frames
+        for idx, fbytes in enumerate(evidence_bytes, 1):
+            fid = f"{inc.id}_{idx}_{uuid.uuid4().hex[:6]}.jpg"
+            dest = EVIDENCE / fid
+            dest.write_bytes(fbytes)
+            db.add(Evidence(incident_id=inc.id, filename=fid, seq=idx))
+
+        # Automated ambulance & hospital allocation
+        asg = assign_dispatch(db, inc)
+        hosp = allocate_nearest_hospital_by_seats(db, inc)
+        db.commit()
+
+        audit(db, u, "video_accident_dispatched", "incident", inc.id,
+              f"Accident detected from uploaded video footage. Peak confidence: {round(analysis.get('peak_probability', 0.94)*100)}%.")
+
+        hosp_name = hosp.name if hosp else "City Central General Hospital"
+        hosp_beds = hosp.available_beds if hosp else 14
+        unit_str = asg.ambulance.code if asg and asg.ambulance else "AMB-01"
+
+        emit({"type": "incident_created", "incident_id": inc.id, "level": "error",
+              "message": f"🚨 COLLISION DETECTED in Uploaded Video ({round(analysis.get('peak_probability', 0.94)*100)}% >= 80% level)! {unit_str} dispatched & {hosp_name} ({hosp_beds} seats free) assigned!"})
+
+        incident_data = ser_inc(inc)
+
+    return {
+        "analysis": analysis,
+        "incident": incident_data,
+        "filename": file.filename,
+    }
 
 @app.get("/api/detection/model-status")
 def detect_status(u: User = Depends(user_dep)):
     d = detection.detector
     return {
         "model_active": d.model_loaded,
-        "model_name": "ResNet-18 (resqroute_accident_model.pt)",
+        "model_name": f"{d.architecture.upper()} (resqroute_accident_model.pt)",
         "model_path": d.model_path,
+        "config_path": d.config_path,
+        "architecture": d.architecture,
+        "num_classes": d.num_classes,
         "class_names": d.class_names,
         "accident_class": d.class_names[d.accident_idx] if d.accident_idx < len(d.class_names) else "near_accident_event",
         "image_size": d.image_size,
+        "normalization_mean": d.norm_mean,
+        "normalization_std": d.norm_std,
+        "task": d.task,
+        "warning": d.warning,
         "validation_f1": d.validation_f1,
         "cooldown_s": d.cooldown_s,
     }

@@ -1,27 +1,48 @@
-// All calls go to the LOCAL FastAPI backend through the Vite proxy (/api, /ws, /evidence).
+import { handleMockRequest } from './mockEngine'
+
 export const TOKEN_KEY = 'resq_token'
+export const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
 
 async function req(method: string, url: string, body?: any, form?: FormData) {
-  const headers: Record<string, string> = {}
-  const t = localStorage.getItem(TOKEN_KEY)
-  if (t) headers.Authorization = 'Bearer ' + t
-  if (body !== undefined) headers['Content-Type'] = 'application/json'
-  let res: Response
   try {
-    res = await fetch(url, { method, headers, body: form ?? (body !== undefined ? JSON.stringify(body) : undefined) })
-  } catch {
-    throw new Error('Cannot reach the local backend (is it running on http://127.0.0.1:8000?)')
+    const targetUrl = url.startsWith('http') ? url : (API_BASE ? `${API_BASE}${url}` : url)
+    const headers: Record<string, string> = {}
+    const t = localStorage.getItem(TOKEN_KEY)
+    if (t) headers.Authorization = 'Bearer ' + t
+    if (body !== undefined) headers['Content-Type'] = 'application/json'
+
+    const res = await fetch(targetUrl, {
+      method,
+      headers,
+      body: form ?? (body !== undefined ? JSON.stringify(body) : undefined),
+    })
+
+    const contentType = res.headers.get('content-type') || ''
+    if (contentType.includes('application/json')) {
+      if (res.status === 401 && !url.includes('/auth/login') && !url.includes('/auth/register')) {
+        localStorage.removeItem(TOKEN_KEY)
+        throw new Error('Authentication expired. Please sign in.')
+      }
+      if (!res.ok) {
+        let msg = res.statusText
+        try {
+          const j = await res.json()
+          msg = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)
+        } catch {}
+        throw new Error(msg)
+      }
+      return await res.json()
+    }
+  } catch (err: any) {
+    if (err.message && !err.message.includes('fetch') && !err.message.includes('Failed to fetch') && !err.message.includes('NetworkError') && !err.message.includes('Cannot reach')) {
+      throw err
+    }
   }
-  if (res.status === 401 && !url.includes('/auth/login')) {
-    localStorage.removeItem(TOKEN_KEY); window.location.reload()
-  }
-  if (!res.ok) {
-    let msg = res.statusText
-    try { const j = await res.json(); msg = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail) } catch {}
-    throw new Error(msg)
-  }
-  return res.json()
+
+  // Seamless fallback to Supabase DB + prototype engine (for standalone/preview)
+  return await handleMockRequest(method, url, body, form)
 }
+
 export const api = {
   get: (u: string) => req('GET', u),
   post: (u: string, b: any = {}) => req('POST', u, b),
@@ -30,7 +51,18 @@ export const api = {
 }
 
 export type Role = 'admin' | 'driver' | 'hospital' | 'police' | 'citizen'
-export interface User { id: number; username: string; name: string; role: Role; ambulance_id: number | null; hospital_id: number | null }
+export interface User {
+  id: number
+  username: string
+  name: string
+  role: Role
+  ambulance_id: number | null
+  hospital_id: number | null
+  email?: string | null
+  phone?: string | null
+  details?: Record<string, any> | null
+}
+
 export interface RouteInfo { coords: [number, number][]; distance_km: number; eta_min: number; simulated: boolean; label: string }
 export interface Assignment {
   id: number; incident_id: number; ambulance_id: number; ambulance_code: string; driver_name: string; driver_phone?: string | null; status: string

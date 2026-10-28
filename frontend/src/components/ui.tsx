@@ -1,6 +1,48 @@
-import { ReactNode, ButtonHTMLAttributes } from 'react'
-import { Loader2, Inbox, CheckCircle2, AlertTriangle, XCircle, Info } from 'lucide-react'
+import { ReactNode, ButtonHTMLAttributes, Component, ErrorInfo } from 'react'
+import { Loader2, Inbox, CheckCircle2, AlertTriangle, XCircle, Info, RefreshCw } from 'lucide-react'
 import { useApp } from '../lib/store'
+
+export class ErrorBoundary extends Component<{ children: ReactNode; fallbackText?: string }, { hasError: boolean; error: Error | null }> {
+  constructor(props: any) {
+    super(props)
+    this.state = { hasError: false, error: null }
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error }
+  }
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error('[ResQRoute ErrorBoundary caught]', error, errorInfo)
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-6 rounded-2xl bg-slate-900/90 border border-red-500/30 text-slate-100 max-w-xl mx-auto my-8 shadow-2xl backdrop-blur-xl">
+          <div className="flex items-center gap-3 text-rose-400 mb-2">
+            <AlertTriangle className="w-6 h-6 shrink-0 animate-bounce" />
+            <h3 className="font-bold text-base text-white">View Recovery Safeguard Active</h3>
+          </div>
+          <p className="text-xs text-slate-300 leading-relaxed mb-3">
+            {this.props.fallbackText || 'A data condition occurred. The screen was kept alive smoothly without turning blank.'}
+          </p>
+          {this.state.error && (
+            <div className="text-[11px] font-mono p-2.5 rounded-lg bg-black/40 text-rose-300 border border-white/5 mb-4 max-h-24 overflow-y-auto">
+              {this.state.error.message}
+            </div>
+          )}
+          <button
+            onClick={() => this.setState({ hasError: false, error: null })}
+            className="px-4 py-2 rounded-xl text-xs font-semibold bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white shadow-lg cursor-pointer flex items-center gap-1.5 transition"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Restore & Re-render</span>
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
 
 const STATUS: Record<string, string> = {
   suspected: 'bg-amber-500/20 text-amber-300 border border-amber-500/30',

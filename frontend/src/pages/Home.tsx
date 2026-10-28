@@ -3,7 +3,7 @@ import {
   Siren, Shield, Truck, Building2, ShieldAlert, Users, ArrowRight,
   Clock, Heart, Activity, CheckCircle2, ChevronRight, Sparkles,
   PhoneCall, MapPin, Eye, Bell, Radio, Lock, Stethoscope, Compass,
-  ChevronDown, ExternalLink, Zap, Layers, AlertCircle
+  ChevronDown, ExternalLink, Zap, Layers, AlertCircle, UserPlus
 } from 'lucide-react'
 import { useApp } from '../lib/store'
 import Login, { PORTAL_ROLES } from './Login'
@@ -15,6 +15,7 @@ interface HomeProps {
 export default function Home({ onEnterDashboard }: HomeProps) {
   const { user, logout } = useApp()
   const [loginModalOpen, setLoginModalOpen] = useState(false)
+  const [loginModalMode, setLoginModalMode] = useState<'login' | 'register'>('login')
   const [selectedLoginRole, setSelectedLoginRole] = useState('admin')
   const [activeStep, setActiveStep] = useState(3)
   const [heroSimState, setHeroSimState] = useState<'detect' | 'parallel' | 'hospital'>('parallel')
@@ -28,14 +29,21 @@ export default function Home({ onEnterDashboard }: HomeProps) {
     return () => clearInterval(timer)
   }, [])
 
-  const openPortalLogin = (roleId: string) => {
+  const openPortalLogin = (roleId: string = 'admin') => {
     setSelectedLoginRole(roleId)
+    setLoginModalMode('login')
+    setLoginModalOpen(true)
+  }
+
+  const openPortalRegister = (roleId: string = 'citizen') => {
+    setSelectedLoginRole(roleId)
+    setLoginModalMode('register')
     setLoginModalOpen(true)
   }
 
   const handlePrimaryCta = () => {
     if (user) {
-      onEnterDashboard('overview')
+      onEnterDashboard(user.role === 'admin' ? 'camera' : undefined)
     } else {
       openPortalLogin('admin')
     }
@@ -118,15 +126,25 @@ export default function Home({ onEnterDashboard }: HomeProps) {
                 </button>
               </div>
             ) : (
-              /* If User is Not Logged In: Clean Unified CTA */
-              <button
-                onClick={() => openPortalLogin('admin')}
-                className="px-4 py-2 rounded-xl text-xs font-semibold bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white shadow-lg shadow-cyan-500/25 border border-cyan-400/30 flex items-center gap-1.5 transition-all cursor-pointer hover:shadow-cyan-500/40 active:scale-95"
-              >
-                <Shield className="w-3.5 h-3.5 text-cyan-100" />
-                <span>Authorized Portal</span>
-                <ChevronRight className="w-3.5 h-3.5 opacity-70" />
-              </button>
+              /* If User is Not Logged In: Both Register and Sign In */
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => openPortalRegister('citizen')}
+                  className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5 transition-all cursor-pointer hover:shadow-emerald-500/20 active:scale-95"
+                  title="Create a new account"
+                >
+                  <UserPlus className="w-3.5 h-3.5 text-emerald-300" />
+                  <span>Register</span>
+                </button>
+                <button
+                  onClick={() => openPortalLogin('admin')}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white shadow-lg shadow-cyan-500/25 border border-cyan-400/30 flex items-center gap-1.5 transition-all cursor-pointer hover:shadow-cyan-500/40 active:scale-95"
+                >
+                  <Shield className="w-3.5 h-3.5 text-cyan-100" />
+                  <span>Sign In</span>
+                  <ChevronRight className="w-3.5 h-3.5 opacity-70" />
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -172,6 +190,16 @@ export default function Home({ onEnterDashboard }: HomeProps) {
                   <span>Access Emergency Network</span>
                   <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
                 </button>
+
+                {!user && (
+                  <button
+                    onClick={() => openPortalRegister('citizen')}
+                    className="w-full sm:w-auto px-7 py-4 rounded-2xl font-bold text-base bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 hover:border-emerald-500/50 active:scale-[0.98] transition flex items-center justify-center gap-2.5 cursor-pointer shadow-lg shadow-emerald-500/10"
+                  >
+                    <UserPlus className="w-5 h-5 text-emerald-400" />
+                    <span>Register Account</span>
+                  </button>
+                )}
 
                 <a
                   href="#golden-time"
@@ -954,14 +982,25 @@ export default function Home({ onEnterDashboard }: HomeProps) {
                     <div className="text-[11px] font-mono text-slate-400">
                       ID: <span className="text-slate-200">{role.u}</span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => openPortalLogin(role.id)}
-                      className="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 flex items-center gap-1.5 transition cursor-pointer"
-                    >
-                      <span>Sign In</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => openPortalRegister(role.id)}
+                        className="px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1 transition cursor-pointer"
+                        title={`Register as new ${role.label}`}
+                      >
+                        <UserPlus className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Register</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openPortalLogin(role.id)}
+                        className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 flex items-center gap-1.5 transition cursor-pointer"
+                      >
+                        <span>Sign In</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               )
@@ -1157,6 +1196,7 @@ export default function Home({ onEnterDashboard }: HomeProps) {
         <Login
           isModal={true}
           initialRole={selectedLoginRole}
+          initialMode={loginModalMode}
           onClose={() => setLoginModalOpen(false)}
           onSuccess={() => {
             setLoginModalOpen(false)
